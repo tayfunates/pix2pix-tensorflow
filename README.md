@@ -24,7 +24,7 @@ This port is based directly on the torch implementation, and not on an existing 
 
 ```sh
 # clone this repo
-git clone https://github.com/affinelayer/pix2pix-tensorflow.git
+git clone https://github.com/tayfunates/pix2pix-tensorflow.git
 cd pix2pix-tensorflow
 # download the CMP Facades dataset (generated from http://cmp.felk.cvut.cz/~tylecr1/facade/)
 python tools/download-dataset.py facades
