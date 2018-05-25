@@ -38,18 +38,18 @@ output_val_directory = os.path.join(a.output_dir, "val")
 
 def getLabelToColorDictionary():
     colorDict = {}
-    colorDict['00'] = [255, 0, 0]
-    colorDict['01'] = [0, 255, 0]
-    colorDict['02'] = [0, 0, 255]
-    colorDict['03'] = [255, 102, 255]
-    colorDict['04'] = [255, 255, 153]
-    colorDict['05'] = [0, 255, 255]
-    colorDict['06'] = [153, 76, 0]
-    colorDict['07'] = [0, 102, 102]
-    colorDict['08'] = [0, 102, 255]
-    colorDict['09'] = [255, 204, 204]
-    colorDict['10'] = [202, 202, 202]
-    colorDict['11'] = [102, 0, 204]
+    colorDict['00'] = [255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0]
+    colorDict['01'] = [0.0 / 255.0, 255.0 / 255.0, 0.0 / 255.0]
+    colorDict['02'] = [0.0 / 255.0, 0.0 / 255.0, 255.0 / 255.0]
+    colorDict['03'] = [255.0 / 255.0, 102.0 / 255.0, 255.0 / 255.0]
+    colorDict['04'] = [255.0 / 255.0, 255.0 / 255.0, 153.0 / 255.0]
+    colorDict['05'] = [0.0 / 255.0, 255.0 / 255.0, 255.0 / 255.0]
+    colorDict['06'] = [153.0 / 255.0, 76.0 / 255.0, 0.0 / 255.0]
+    colorDict['07'] = [0.0 / 255.0, 102.0 / 255.0, 102.0 / 255.0]
+    colorDict['08'] = [0.0 / 255.0, 102.0 / 255.0, 255.0 / 255.0]
+    colorDict['09'] = [255.0 / 255.0, 204.0 / 255.0, 204.0 / 255.0]
+    colorDict['10'] = [202.0 / 255.0, 202.0 / 255.0, 202.0 / 255.0]
+    colorDict['11'] = [102.0 / 255.0, 0.0 / 255.0, 204.0 / 255.0]
     return colorDict
     
 
@@ -58,19 +58,20 @@ def getLabelImages(label_folder, labels):
     labelIds = labels.split(',')
     for lid in labelIds:
         for label_path in im.find(label_folder):
-            if label_path.find(lid) > 0: #if found the label
+            if label_path.find('lbl'+lid) > 0: #if found the label
                 ret[lid] = label_path
                 break
     return ret
     
 def getLabelImage(label_image_paths, color_dict, cut_threshold):
     res = None
+    thresh = cut_threshold / 255.0
     for label_id, label_img_path in label_image_paths.iteritems():
         label_image = im.load(label_img_path)
         print label_img_path
         print label_image.shape
-        label_image[label_image >= cut_threshold] = 1.0
-        label_image[label_image < cut_threshold] = 0.0
+        label_image[label_image >= thresh] = 1.0
+        label_image[label_image < thresh] = 0.0
         label_image = np.reshape(label_image, (label_image.shape[0], label_image.shape[1]))
         if res is None:
             res = np.empty((label_image.shape[0], label_image.shape[1], 3))
