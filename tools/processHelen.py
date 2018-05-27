@@ -12,13 +12,17 @@ import multiprocessing
 parser = argparse.ArgumentParser()
 parser.add_argument("--input_dir", required=True, help="path to folder containing images")
 parser.add_argument("--label_images_dir", required=True, help="path to folder containing labels inside the face")
-parser.add_argument("--output_dir", required=True, help="output path")
+parser.add_argument("--output_dir_images", required=True, help="output path")
+parser.add_argument("--output_dir_labels", required=True, help="output path")
 parser.add_argument("--labels", required=True, help="output labels with comma separation. 00 and 01 are musts. e.g. 00,01,04,07")
 parser.add_argument("--workers", type=int, default=1, help="number of workers")
 
 #Resizing operation parameters
-parser.add_argument("--resize", action="store_true", help="decide whether or not to resize the input and the label images")
+parser.add_argument("--resize", action="store_false", help="decide whether or not to resize the input and the label images")
 parser.add_argument("--size", type=int, default=256, help="size to use for resize operation")
+
+#Crop options
+parser.add_argument("--crop", action="store_false", help="decide whether or not to crop the input and the label images")
 
 #Label parameters
 parser.add_argument("--label_cut_threshold", type=int, default=128, help="threshold for converting grayscale label images to binary ones")
@@ -30,10 +34,13 @@ parser.add_argument("--combine_hairs", action="store_false", help="combine hair 
 
 a = parser.parse_args()
 
-output_train_directory = os.path.join(a.output_dir, "train")
-output_test_directory = os.path.join(a.output_dir, "test")
-output_val_directory = os.path.join(a.output_dir, "val")
+output_train_directory_images = os.path.join(a.output_dir_images, "train")
+output_test_directory_images = os.path.join(a.output_dir_images, "test")
+output_val_directory_images = os.path.join(a.output_dir_images, "val")
 
+output_train_directory_labels = os.path.join(a.output_dir_labels, "train")
+output_test_directory_labels = os.path.join(a.output_dir_labels, "test")
+output_val_directory_labels = os.path.join(a.output_dir_labels, "val")
 
 
 def getLabelToColorDictionary():
@@ -63,6 +70,13 @@ def getLabelImages(label_folder, labels):
                 break
     return ret
     
+
+def thresholdImage(img, thresh):
+    img[img >= thresh] = 1.0
+    img[img < thresh] = 0.0
+    return img
+    
+    
 def getLabelImage(label_image_paths, color_dict, cut_threshold):
     res = None
     thresh = cut_threshold / 255.0
@@ -70,13 +84,20 @@ def getLabelImage(label_image_paths, color_dict, cut_threshold):
         label_image = im.load(label_img_path)
         print label_img_path
         print label_image.shape
-        label_image[label_image >= thresh] = 1.0
-        label_image[label_image < thresh] = 0.0
+        
+        label_image = thresholdImage(label_image, thresh)
+
         label_image = np.reshape(label_image, (label_image.shape[0], label_image.shape[1]))
         if res is None:
             res = np.empty((label_image.shape[0], label_image.shape[1], 3))
         res[label_image > 0.5, :] = color_dict[label_id]
     return res
+    
+def getCropReference(label_image_paths, cut_threshold):
+    thresh = cut_threshold / 255.0
+    crop_reference = im.load(label_image_paths['01'])
+    crop_reference = thresholdImage(crop_reference, thresh)
+    return crop_reference
         
 complete_lock = threading.Lock()
 start = None
@@ -102,19 +123,33 @@ def complete():
     
 
 def main():
-    if not os.path.exists(a.output_dir):
-        os.makedirs(a.output_dir)
-    if not os.path.exists(output_train_directory):
-        os.makedirs(output_train_directory)
-    if not os.path.exists(output_test_directory):
-        os.makedirs(output_test_directory)
-    if not os.path.exists(output_val_directory):
-        os.makedirs(output_val_directory)
+    if not os.path.exists(a.output_dir_labels):
+        os.makedirs(a.output_dir_labels)
+    if not os.path.exists(output_train_directory_labels):
+        os.makedirs(output_train_directory_labels)
+    if not os.path.exists(output_test_directory_labels):
+        os.makedirs(output_test_directory_labels)
+    if not os.path.exists(output_val_directory_labels):
+        os.makedirs(output_val_directory_labels)
+        
+    processInputImages = a.resize or a.crop
+    
+    if not os.path.exists(a.output_dir_images) and processInputImages:
+        os.makedirs(a.output_dir_images)
+    if not os.path.exists(output_train_directory_images) and processInputImages:
+        os.makedirs(output_train_directory_images)
+    if not os.path.exists(output_test_directory_images) and processInputImages:
+        os.makedirs(output_test_directory_images)
+    if not os.path.exists(output_val_directory_images) and processInputImages:
+        os.makedirs(output_val_directory_images)
+        
+    #cropped images directory
 
     splits = ['train', 'test', 'val']
     
     src_paths = []
-    dst_paths = []
+    dst_paths_labels = []
+    dst_paths_images = []
     
     skipped = 0
     for split in splits:
@@ -122,14 +157,17 @@ def main():
         for src_path in im.find(split_folder):
     
             name, _ = os.path.splitext(os.path.basename(src_path))
-            dst_path = os.path.join(a.output_dir, split)
-            dst_path = os.path.join(dst_path, name + ".png")
+            dst_path_label = os.path.join(a.output_dir_labels, split)
+            dst_path_label = os.path.join(dst_path_label, name + ".png")
+            dst_path_image = os.path.join(a.output_dir_images, split)
+            dst_path_image = os.path.join(dst_path_image, name + ".png")
             
-            if os.path.exists(dst_path):
+            if os.path.exists(dst_path_label) or os.path.exists(dst_path_image):
                 skipped += 1
             else:
                 src_paths.append(src_path)
-                dst_paths.append(dst_path)
+                dst_paths_labels.append(dst_path_label)
+                dst_paths_images.append(dst_path_image)
             
     print("skipping %d files that already exist" % skipped)
     
@@ -143,7 +181,7 @@ def main():
     
     if a.workers == 1:
         with tf.Session() as sess:
-            for src_path, dst_path in zip(src_paths, dst_paths):
+            for src_path, dst_path_label, dst_path_image in zip(src_paths, dst_paths_labels, dst_paths_images):
             
                 name, _ = os.path.splitext(os.path.basename(src_path))
             
@@ -157,12 +195,16 @@ def main():
             
                 color_dict = getLabelToColorDictionary()
             
-            
 
                 label_img = getLabelImage(label_image_paths, color_dict, a.label_cut_threshold)
+                
+                if processInputImages:
+                    crop_reference = getCropReference(label_image_paths, a.label_cut_threshold)
+                    
+                
                 complete()
                 
-                im.save(label_img, dst_path)
+                im.save(label_img, dst_path_label)
             
                 break
 
