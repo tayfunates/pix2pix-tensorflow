@@ -8,6 +8,8 @@ import tfimage as im
 import threading
 import time
 import multiprocessing
+import matplotlib
+import scipy.misc as sm
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--input_dir", required=True, help="path to folder containing images")
@@ -15,6 +17,7 @@ parser.add_argument("--label_images_dir", required=True, help="path to folder co
 parser.add_argument("--output_dir_images", required=True, help="output path")
 parser.add_argument("--output_dir_labels", required=True, help="output path")
 parser.add_argument("--labels", required=True, help="output labels with comma separation. 00 and 01 are musts. e.g. 00,01,04,07")
+parser.add_argument("--color_map", required=True, help="Color map png")
 parser.add_argument("--workers", type=int, default=1, help="number of workers")
 
 #Resizing operation parameters
@@ -27,11 +30,6 @@ parser.add_argument("--crop", action="store_true", help="decide whether or not t
 
 #Label parameters
 parser.add_argument("--label_cut_threshold", type=int, default=128, help="threshold for converting grayscale label images to binary ones")
-
-#Label combine settings
-parser.add_argument("--combine_lips", action="store_true", help="combine lips and inner mouth to a single color if they exist")
-parser.add_argument("--combine_eyebrows", action="store_true", help="combine eyebrows to a single color if they exist")
-parser.add_argument("--combine_hairs", action="store_false", help="combine hair and eyebrows to a single color if they exist")
 
 a = parser.parse_args()
 
@@ -79,18 +77,22 @@ def crop(src, cropReference):
 
 def getLabelToColorDictionary():
     colorDict = {}
+    
+    cmap = matplotlib.colors.ListedColormap(sm.imread(a.color_map)[0].astype(np.float32) / 255.)
+    cmap = cmap(np.arange(cmap.N))
+    
+    #Color settings according to https://github.com/classner/generating_people
     colorDict['00'] = [255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0]
-    colorDict['01'] = [0.0 / 255.0, 255.0 / 255.0, 0.0 / 255.0]
-    colorDict['02'] = [0.0 / 255.0, 0.0 / 255.0, 255.0 / 255.0]
-    colorDict['03'] = [255.0 / 255.0, 102.0 / 255.0, 255.0 / 255.0]
-    colorDict['04'] = [255.0 / 255.0, 255.0 / 255.0, 153.0 / 255.0]
-    colorDict['05'] = [0.0 / 255.0, 255.0 / 255.0, 255.0 / 255.0]
-    colorDict['06'] = [153.0 / 255.0, 76.0 / 255.0, 0.0 / 255.0]
-    colorDict['07'] = [0.0 / 255.0, 102.0 / 255.0, 102.0 / 255.0]
-    colorDict['08'] = [0.0 / 255.0, 102.0 / 255.0, 255.0 / 255.0]
-    colorDict['09'] = [255.0 / 255.0, 204.0 / 255.0, 204.0 / 255.0]
-    colorDict['10'] = [202.0 / 255.0, 202.0 / 255.0, 202.0 / 255.0]
-    colorDict['11'] = [102.0 / 255.0, 0.0 / 255.0, 204.0 / 255.0]
+    colorDict['01'] = cmap[11][:3]
+    colorDict['02'] = cmap[11][:3]
+    colorDict['03'] = cmap[11][:3]
+    colorDict['04'] = cmap[20][:3]
+    colorDict['05'] = cmap[21][:3]
+    colorDict['06'] = cmap[19][:3]
+    colorDict['07'] = cmap[18][:3]
+    colorDict['08'] = cmap[18][:3]
+    colorDict['09'] = cmap[18][:3]
+    colorDict['10'] = [255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0]
     return colorDict
     
 
@@ -249,8 +251,6 @@ def main():
                     
                 im.save(label_img, dst_path_label)
                 complete()
-                
-                break
 
 
 main()
