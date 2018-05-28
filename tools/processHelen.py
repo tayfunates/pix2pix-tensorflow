@@ -18,11 +18,12 @@ parser.add_argument("--labels", required=True, help="output labels with comma se
 parser.add_argument("--workers", type=int, default=1, help="number of workers")
 
 #Resizing operation parameters
-parser.add_argument("--resize", action="store_false", help="decide whether or not to resize the input and the label images")
+parser.add_argument("--resize", action="store_true", help="decide whether or not to resize the input and the label images")
+parser.add_argument("--pad", action="store_true", help="pad instead of crop for resize operation")
 parser.add_argument("--size", type=int, default=256, help="size to use for resize operation")
 
 #Crop options
-parser.add_argument("--crop", action="store_false", help="decide whether or not to crop the input and the label images")
+parser.add_argument("--crop", action="store_true", help="decide whether or not to crop the input and the label images")
 
 #Label parameters
 parser.add_argument("--label_cut_threshold", type=int, default=128, help="threshold for converting grayscale label images to binary ones")
@@ -42,6 +43,39 @@ output_train_directory_labels = os.path.join(a.output_dir_labels, "train")
 output_test_directory_labels = os.path.join(a.output_dir_labels, "test")
 output_val_directory_labels = os.path.join(a.output_dir_labels, "val")
 
+def resize(src):
+    height, width, _ = src.shape
+    dst = src
+    if height != width:
+        if a.pad:
+            size = max(height, width)
+            # pad to correct ratio
+            oh = (size - height) // 2
+            ow = (size - width) // 2
+            dst = im.pad(image=dst, offset_height=oh, offset_width=ow, target_height=size, target_width=size)
+        else:
+            # crop to correct ratio
+            size = min(height, width)
+            oh = (height - size) // 2
+            ow = (width - size) // 2
+            dst = im.crop(image=dst, offset_height=oh, offset_width=ow, target_height=size, target_width=size)
+
+    assert(dst.shape[0] == dst.shape[1])
+
+    size, _, _ = dst.shape
+    if size > a.size:
+        dst = im.downscale(images=dst, size=[a.size, a.size])
+    elif size < a.size:
+        dst = im.upscale(images=dst, size=[a.size, a.size])
+    return dst
+    
+def crop(src, cropReference):
+    rows = np.any(cropReference, axis=1)
+    cols = np.any(cropReference, axis=0)
+    rmin, rmax = np.where(rows)[0][[0, -1]]
+    cmin, cmax = np.where(cols)[0][[0, -1]]
+    return src[rmin:rmax, cmin:cmax, :]
+
 
 def getLabelToColorDictionary():
     colorDict = {}
@@ -60,9 +94,9 @@ def getLabelToColorDictionary():
     return colorDict
     
 
-def getLabelImages(label_folder, labels):
+def getLabelImages(label_folder):
     ret = {}
-    labelIds = labels.split(',')
+    labelIds = a.labels.split(',')
     for lid in labelIds:
         for label_path in im.find(label_folder):
             if label_path.find('lbl'+lid) > 0: #if found the label
@@ -77,9 +111,9 @@ def thresholdImage(img, thresh):
     return img
     
     
-def getLabelImage(label_image_paths, color_dict, cut_threshold):
+def getLabelImage(label_image_paths, color_dict):
     res = None
-    thresh = cut_threshold / 255.0
+    thresh = a.label_cut_threshold / 255.0
     for label_id, label_img_path in label_image_paths.iteritems():
         label_image = im.load(label_img_path)
         print label_img_path
@@ -93,9 +127,9 @@ def getLabelImage(label_image_paths, color_dict, cut_threshold):
         res[label_image > 0.5, :] = color_dict[label_id]
     return res
     
-def getCropReference(label_image_paths, cut_threshold):
-    thresh = cut_threshold / 255.0
+def getCropReference(label_image_paths):
     crop_reference = im.load(label_image_paths['01'])
+    thresh = a.label_cut_threshold / 255.0
     crop_reference = thresholdImage(crop_reference, thresh)
     return crop_reference
         
@@ -189,23 +223,33 @@ def main():
             
                 label_folder = os.path.join(a.label_images_dir, name)
             
-                label_image_paths = getLabelImages(label_folder, a.labels)
+                label_image_paths = getLabelImages(label_folder)
             
                 print label_image_paths
             
                 color_dict = getLabelToColorDictionary()
             
 
-                label_img = getLabelImage(label_image_paths, color_dict, a.label_cut_threshold)
+                label_img = getLabelImage(label_image_paths, color_dict)
                 
                 if processInputImages:
-                    crop_reference = getCropReference(label_image_paths, a.label_cut_threshold)
+                    processedImage = im.load(src_path)
                     
-                
+                    if a.crop:
+                        crop_reference = getCropReference(label_image_paths)
+
+                        processedImage = crop(processedImage, crop_reference)
+                        label_img = crop(label_img, crop_reference)
+                        
+                        if a.resize:
+                            processedImage = resize(processedImage)
+                            label_img = resize(label_img)
+                        
+                    im.save(processedImage, dst_path_image)
+                    
+                im.save(label_img, dst_path_label)
                 complete()
                 
-                im.save(label_img, dst_path_label)
-            
                 break
 
 
