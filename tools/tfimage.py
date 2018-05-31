@@ -119,6 +119,13 @@ def find(d):
     result.sort()
     return result
 
+def findContainingSubtext(d, sub):
+    result = []
+    allImgs = find(d)
+    for path in allImgs:
+        if sub in path:
+            result.append(path)
+    return result
 
 def save(image, path, replace=False):
     _, ext = os.path.splitext(path.lower())
