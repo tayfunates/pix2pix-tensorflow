@@ -16,6 +16,8 @@ import scipy.misc as sm
 parser = argparse.ArgumentParser()
 parser.add_argument("--input_dir", required=True, help="path to folder containing images generated from portray module (PM)")
 parser.add_argument("--output_dir", required=True, help="output path which will contain several subfolders")
+parser.add_argument("--pix2pix", required=True, help="script for testing generating face images")
+parser.add_argument("--combinescript", required=True, help="script for concatanating two image sets")
 parser.add_argument("--fm_model_path", required=True, help="trained face module path")
 parser.add_argument("--fm_input_size", type=int, default=256, help="size to use for resize operation to input face module")
 parser.add_argument("--color_map", required=True, help="color map png")
@@ -25,7 +27,7 @@ parser.add_argument("--pad", action="store_true", help="pad instead of crop for 
 
 a = parser.parse_args()
 
-output_types = ['humanseginputs', 'humangeninputs', 'croppedsegfaces', 'resizedsegfaces']
+output_types = ['humanseginputs', 'humangeninputs', 'croppedsegfaces', 'croppedgenfaces', 'resizedsegfaces', 'resizedgenfaces', 'combinedseggenfaces', 'generatedfaces']
 
 complete_lock = threading.Lock()
 start = None
@@ -44,7 +46,7 @@ def addBackground(src, skin_color, positive_colors, background_color):
     
     return res
     
-def resize(src, tfUpscaleInterpolationType=tf.image.ResizeMethod.BICUBIC, tfDownscaleInterpolationType=tf.image.ResizeMethod.AREA):
+def resize(src, tfUpscaleInterpolationType):
     height, width, _ = src.shape
     dst = src
     if height != width:
@@ -74,16 +76,19 @@ def resize(src, tfUpscaleInterpolationType=tf.image.ResizeMethod.BICUBIC, tfDown
     return dst
 
 def crop(src, cropReference):
-    rows = np.any(cropReference, axis=1)
-    cols = np.any(cropReference, axis=0)
-    rmin, rmax = np.where(rows)[0][[0, -1]]
-    cmin, cmax = np.where(cols)[0][[0, -1]]
+    try:
+        rows = np.any(cropReference, axis=1)
+        cols = np.any(cropReference, axis=0)
+        rmin, rmax = np.where(rows)[0][[0, -1]]
+        cmin, cmax = np.where(cols)[0][[0, -1]]
+    except IndexError:
+        return src
     return src[rmin:rmax, cmin:cmax, :]
-
-def cropFace(src, skin_color):
+    
+def getFaceCropReference(src, skin_color):
     cropReference = np.zeros(shape=(src.shape[0], src.shape[1], 3), dtype=int)
     cropReference[(abs(src-skin_color)<COLOR_EPSILON).all(2)] = (1, 1, 1)
-    return crop(src, cropReference)
+    return cropReference
 
 def getLabelToColorDictionary():
     colorDict = {}
@@ -139,7 +144,47 @@ def complete():
 
         last_complete = now
         
-
+def combineFaceSegFaceGen(inputDirA, inputDirB, outputDir):
+    command = 'python'
+    command += ' '
+    command += a.combinescript
+    command += ' '
+    command += '--input_dir'
+    command += ' '
+    command += inputDirA
+    command += ' '
+    command += '--b_dir'
+    command += ' '
+    command += inputDirB
+    command += ' '
+    command += '--operation combine'
+    command += ' '
+    command += '--output_dir'
+    command += ' '
+    command += outputDir
+    os.system(command)
+        
+        
+def runFacePix2PixModule(inputDir, outputDir):
+    command = 'python'
+    command += ' '
+    command += a.pix2pix
+    command += ' '
+    command += '--mode test'
+    command += ' '
+    command += '--output_dir'
+    command += ' '
+    command += outputDir
+    command += ' '
+    command += '--input_dir'
+    command += ' '
+    command += inputDir
+    command += ' '
+    command += '--checkpoint'
+    command += ' '
+    command += a.fm_model_path
+    
+    os.system(command)
 
 def main():
     
@@ -207,18 +252,35 @@ def main():
             im.save(seg_image, name_out_dict['humanseginputs'])
             im.save(gen_image, name_out_dict['humangeninputs'])
             
-            #Cropped face segmentation
-            temp_image = cropFace(seg_image, skin_color)
-            temp_image = addBackground(temp_image, skin_color, positive_colors, background_color)
-            im.save(temp_image, name_out_dict['croppedsegfaces'])
+            #Crop reference
+            crop_reference = getFaceCropReference(seg_image, skin_color)
             
-            #Resized face segmentation
-            temp_image = resize(temp_image, tfUpscaleInterpolationType=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-            im.save(temp_image, name_out_dict['resizedsegfaces'])
+            #Cropped face segmentation
+            temp_image_seg = crop(seg_image, crop_reference)
+            temp_image_seg = addBackground(temp_image_seg, skin_color, positive_colors, background_color)
+            im.save(temp_image_seg, name_out_dict['croppedsegfaces'])  
+            #Resize face segmentation
+            temp_image_seg = resize(temp_image_seg, tfUpscaleInterpolationType=tf.image.ResizeMethod.BICUBIC)
+            im.save(temp_image_seg, name_out_dict['resizedsegfaces'])
+            
+            #Cropped face generated
+            temp_image_gen = crop(gen_image, crop_reference)
+            im.save(temp_image_gen, name_out_dict['croppedgenfaces'])
+            #Resize face generated
+            temp_image_gen = resize(temp_image_gen, tfUpscaleInterpolationType=tf.image.ResizeMethod.BICUBIC)
+            im.save(temp_image_gen, name_out_dict['resizedgenfaces'])
 
             complete()
             
-            break
-           
+    #Combine resized seg and gen images to input face module
+    inputDirA = os.path.join(a.output_dir, 'resizedsegfaces')
+    inputDirB = os.path.join(a.output_dir, 'resizedgenfaces')
+    outputDir = os.path.join(a.output_dir, 'combinedseggenfaces')
+    combineFaceSegFaceGen(inputDirA, inputDirB, outputDir)
+            
+    #Now lets generate face images from extracted face segmentation maps
+    inputDir = os.path.join(a.output_dir, 'combinedseggenfaces')
+    outputDir = os.path.join(a.output_dir, 'generatedfaces')
+    runFacePix2PixModule(inputDir, outputDir)    
 
 main()
