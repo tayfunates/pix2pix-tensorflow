@@ -19,9 +19,11 @@ parser.add_argument("--output_dir", required=True, help="output path which will 
 parser.add_argument("--pix2pix", required=True, help="script for testing generating face images")
 parser.add_argument("--combinescript", required=True, help="script for concatanating two image sets")
 parser.add_argument("--fm_model_path", required=True, help="trained face module path")
+parser.add_argument("--upscale_interpolation", required=True, help="type of upscale interpolation")
 parser.add_argument("--fm_input_size", type=int, default=256, help="size to use for resize operation to input face module")
 parser.add_argument("--color_map", required=True, help="color map png")
 parser.add_argument("--pad", action="store_true", help="pad instead of crop for resize operation")
+parser.add_argument("--preserve_aspect_ratio", action="store_true", help="pad instead of crop for resize operation")
 
 ##### TO DO Consider to resize face segmentations by using nearest neighbor interpolation
 
@@ -49,31 +51,44 @@ def addBackground(src, skin_color, positive_colors, background_color):
 def resize(src, tfUpscaleInterpolationType):
     height, width, _ = src.shape
     dst = src
-    if height != width:
-        if a.pad:
-            size = max(height, width)
-            # pad to correct ratio
-            oh = (size - height) // 2
-            ow = (size - width) // 2
-            dst = im.pad(image=dst, offset_height=oh, offset_width=ow, target_height=size, target_width=size)
-        else:
-            # crop to correct ratio
-            size = min(height, width)
-            oh = (height - size) // 2
-            ow = (width - size) // 2
-            dst = im.crop(image=dst, offset_height=oh, offset_width=ow, target_height=size, target_width=size)
+    if a.preserve_aspect_ratio:
+        if height != width:
+            if a.pad:
+                size = max(height, width)
+                # pad to correct ratio
+                oh = (size - height) // 2
+                ow = (size - width) // 2
+                dst = im.pad(image=dst, offset_height=oh, offset_width=ow, target_height=size, target_width=size)
+            else:
+                # crop to correct ratio
+                size = min(height, width)
+                oh = (height - size) // 2
+                ow = (width - size) // 2
+                dst = im.crop(image=dst, offset_height=oh, offset_width=ow, target_height=size, target_width=size)
 
-    assert(dst.shape[0] == dst.shape[1])
+                assert(dst.shape[0] == dst.shape[1])
 
-    size, _, _ = dst.shape
-    if size > a.fm_input_size:
-        dst = im.downscale(images=dst, size=[a.fm_input_size, a.fm_input_size])
-    elif size < a.fm_input_size:
+                size, _, _ = dst.shape
+                if size > a.fm_input_size:
+                    dst = im.downscale(images=dst, size=[a.fm_input_size, a.fm_input_size])
+                elif size < a.fm_input_size:
+                    if tfUpscaleInterpolationType==tf.image.ResizeMethod.BICUBIC:
+                        dst = im.upscale(images=dst, size=[a.fm_input_size, a.fm_input_size])
+                    elif tfUpscaleInterpolationType==tf.image.ResizeMethod.NEAREST_NEIGHBOR:
+                        dst = im.upscaleWithNearestNeighborInterpolation(images=dst, size=[a.fm_input_size, a.fm_input_size])
+    else:
         if tfUpscaleInterpolationType==tf.image.ResizeMethod.BICUBIC:
             dst = im.upscale(images=dst, size=[a.fm_input_size, a.fm_input_size])
         elif tfUpscaleInterpolationType==tf.image.ResizeMethod.NEAREST_NEIGHBOR:
             dst = im.upscaleWithNearestNeighborInterpolation(images=dst, size=[a.fm_input_size, a.fm_input_size])
+    
     return dst
+    
+def getUpscaleInterpolation():
+    if a.upscale_interpolation == 'nearest':
+        return tf.image.ResizeMethod.NEAREST_NEIGHBOR
+    elif a.upscale_interpolation == 'bicubic':
+        return tf.image.ResizeMethod.BICUBIC
 
 def crop(src, cropReference):
     try:
@@ -240,6 +255,8 @@ def main():
     background_color = getBackgroundColor()
     positive_colors = getPositiveColors()
     
+    upscale_interpolation = getUpscaleInterpolation()
+    
     with tf.Session() as sess:
         for name, name_out_dict in output_paths.iteritems():
             print name
@@ -260,14 +277,14 @@ def main():
             temp_image_seg = addBackground(temp_image_seg, skin_color, positive_colors, background_color)
             im.save(temp_image_seg, name_out_dict['croppedsegfaces'])  
             #Resize face segmentation
-            temp_image_seg = resize(temp_image_seg, tfUpscaleInterpolationType=tf.image.ResizeMethod.BICUBIC)
+            temp_image_seg = resize(temp_image_seg, tfUpscaleInterpolationType=upscale_interpolation)
             im.save(temp_image_seg, name_out_dict['resizedsegfaces'])
             
             #Cropped face generated
             temp_image_gen = crop(gen_image, crop_reference)
             im.save(temp_image_gen, name_out_dict['croppedgenfaces'])
             #Resize face generated
-            temp_image_gen = resize(temp_image_gen, tfUpscaleInterpolationType=tf.image.ResizeMethod.BICUBIC)
+            temp_image_gen = resize(temp_image_gen, tfUpscaleInterpolationType=upscale_interpolation)
             im.save(temp_image_gen, name_out_dict['resizedgenfaces'])
 
             complete()
