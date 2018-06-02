@@ -32,6 +32,13 @@ upscale = create_op(
     method=tf.image.ResizeMethod.BICUBIC,
 )
 
+upscaleWithNearestNeighborInterpolation = create_op(
+    func=tf.image.resize_images,
+    images=tf.placeholder(tf.float32, [None, None, None]),
+    size=tf.placeholder(tf.int32, [2]),
+    method=tf.image.ResizeMethod.NEAREST_NEIGHBOR,
+)
+
 decode_jpeg = create_op(
     func=tf.image.decode_jpeg,
     contents=tf.placeholder(tf.string),
