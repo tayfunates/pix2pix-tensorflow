@@ -29,7 +29,7 @@ parser.add_argument("--preserve_aspect_ratio", action="store_true", help="pad in
 
 a = parser.parse_args()
 
-output_types = ['humanseginputs', 'humangeninputs', 'croppedsegfaces', 'croppedgenfaces', 'resizedsegfaces', 'resizedgenfaces', 'combinedseggenfaces', 'generatedfaces']
+output_types = ['humanseginputs', 'humangeninputs', 'croppedsegfaces', 'croppedgenfaces', 'resizedsegfaces', 'resizedgenfaces', 'combinedseggenfaces', 'generatedfaces', 'mergedgenoutputs', 'finalcomparisonimages']
 
 complete_lock = threading.Lock()
 start = None
@@ -84,6 +84,10 @@ def resize(src, tfUpscaleInterpolationType):
     
     return dst
     
+def downscaleToSize(src, scaleSize):
+    dst = im.downscale(images=src, size=scaleSize)
+    return dst
+    
 def getUpscaleInterpolation():
     if a.upscale_interpolation == 'nearest':
         return tf.image.ResizeMethod.NEAREST_NEIGHBOR
@@ -99,6 +103,16 @@ def crop(src, cropReference):
     except IndexError:
         return src
     return src[rmin:rmax, cmin:cmax, :]
+    
+def cropRectangle(cropReference):
+    try:
+        rows = np.any(cropReference, axis=1)
+        cols = np.any(cropReference, axis=0)
+        rmin, rmax = np.where(rows)[0][[0, -1]]
+        cmin, cmax = np.where(cols)[0][[0, -1]]
+    except IndexError:
+        return [0,1,0,1]
+    return [rmin,rmax,cmin,cmax]
     
 def getFaceCropReference(src, skin_color):
     cropReference = np.zeros(shape=(src.shape[0], src.shape[1], 3), dtype=int)
@@ -159,7 +173,7 @@ def complete():
 
         last_complete = now
         
-def combineFaceSegFaceGen(inputDirA, inputDirB, outputDir):
+def combineImagePairs(inputDirA, inputDirB, outputDir):
     command = 'python'
     command += ' '
     command += a.combinescript
@@ -200,7 +214,18 @@ def runFacePix2PixModule(inputDir, outputDir):
     command += a.fm_model_path
     
     os.system(command)
-
+    
+def updateFaceResults(gen_full_body_image, gen_face_image, rmin, rmax, cmin, cmax, crop_reference):
+    result = gen_full_body_image
+    width = rmax-rmin
+    height = cmax-cmin
+    for i in range(0, width):
+        for j in range(0, height):
+            update = crop_reference[i+rmin, j+cmin, 0] > 0.5
+            if update:
+                result[i+rmin, j+cmin, :] = gen_face_image[i, j, :]
+    return result
+    
 def main():
     
     for output_type in output_types:
@@ -293,11 +318,40 @@ def main():
     inputDirA = os.path.join(a.output_dir, 'resizedsegfaces')
     inputDirB = os.path.join(a.output_dir, 'resizedgenfaces')
     outputDir = os.path.join(a.output_dir, 'combinedseggenfaces')
-    combineFaceSegFaceGen(inputDirA, inputDirB, outputDir)
+    combineImagePairs(inputDirA, inputDirB, outputDir)
             
     #Now lets generate face images from extracted face segmentation maps
     inputDir = os.path.join(a.output_dir, 'combinedseggenfaces')
     outputDir = os.path.join(a.output_dir, 'generatedfaces')
     runFacePix2PixModule(inputDir, outputDir)    
-
+    
+    with tf.Session() as sess:
+        for name, name_out_dict in output_paths.iteritems():
+            gen_image = im.load(name_out_dict['humangeninputs'])
+            seg_image = im.load(name_out_dict['humanseginputs'])
+            #Crop reference
+            crop_reference = getFaceCropReference(seg_image, skin_color)
+        
+            #Get crop reference point and size
+            [rmin,rmax,cmin,cmax] = cropRectangle(crop_reference)
+            width = rmax - rmin
+            height = cmax - cmin
+        
+            #Load generated face
+            gen_face_path = os.path.join(a.output_dir, 'generatedfaces')
+            gen_face_path = os.path.join(gen_face_path, 'images')
+            gen_face_path = os.path.join(gen_face_path, name+'-outputs.png')
+        
+            gen_face_image = im.load(gen_face_path)
+            gen_face_image = downscaleToSize(gen_face_image, [width, height])
+        
+            updated_full_body_image = updateFaceResults(gen_image, gen_face_image, rmin, rmax, cmin, cmax, crop_reference)
+            im.save(updated_full_body_image, name_out_dict['mergedgenoutputs'])
+        
+    #Combine original generated full body images and face updated generated images
+    inputDirA = os.path.join(a.output_dir, 'humangeninputs')
+    inputDirB = os.path.join(a.output_dir, 'mergedgenoutputs')
+    outputDir = os.path.join(a.output_dir, 'finalcomparisonimages')
+    combineImagePairs(inputDirA, inputDirB, outputDir)
+        
 main()
